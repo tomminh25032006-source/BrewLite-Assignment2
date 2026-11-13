@@ -1,0 +1,36 @@
+@startuml use-case-checkout
+title Sơ đồ Use-case phạm vi UC-01: Đặt và thanh toán đơn hàng (Task 1.3)
+skinparam packageStyle rectangle
+skinparam usecaseBackgroundColor #FFFDF7
+skinparam usecaseBorderColor #92400E
+skinparam actorBorderColor #44403C
+
+actor "Khách hàng\n(Customer)" as Customer
+actor "Dịch vụ thanh toán\nmô phỏng" as Payment <<system>>
+actor "Nhân viên quầy\n(Barista)" as Barista
+
+rectangle "UC-01 Đặt và thanh toán đơn hàng" {
+  usecase "Đặt và thanh toán\nđơn hàng" as UC01 #FFEDD5
+  usecase "Đăng nhập\n(xác thực JWT)" as Login
+  usecase "Tạo đơn PENDING\n(tính lại giá, kiểm tra tồn kho)" as Create
+  usecase "Thanh toán Ví/Thẻ\n(Idempotency-Key)" as Pay
+  usecase "Áp dụng mã giảm giá" as Promo
+  usecase "Trừ tồn kho\n(optimistic locking)" as Stock
+  usecase "Cộng điểm loyalty" as Loyalty
+  usecase "Hủy đơn chưa thanh toán\n[thanh toán thất bại]" as Cancel
+  usecase "Xem xác nhận và\ntheo dõi đơn" as Track
+  usecase "Tiếp nhận đơn PAID\ntrên màn hình KDS" as Kds
+}
+
+Customer -right-> UC01
+Customer -down-> Track
+UC01 .down.> Login : <<include>>
+UC01 .down.> Create : <<include>>
+UC01 .down.> Pay : <<include>>
+Promo .up.> Create : <<extend>>
+Pay .down.> Stock : <<include>>
+Pay .down.> Loyalty : <<include>>
+Cancel .up.> UC01 : <<extend>>
+Pay -right-> Payment
+Barista -left-> Kds
+@enduml
