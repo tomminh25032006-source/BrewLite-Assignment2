@@ -1,0 +1,87 @@
+name: CI Quality Gate
+
+# Chạy cho mọi pull request; branch protection của main/develop yêu cầu các job này pass mới được merge.
+# Push lên main không kích hoạt ở đây vì cd.yml đã gọi lại workflow này làm quality gate (tránh chạy 2 lần).
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [develop, 'feature/**']
+  workflow_call:
+
+jobs:
+  api:
+    name: API (NestJS) - Install → Lint → Unit Test → Integration Test → Build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./apps/api
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: brewuser
+          POSTGRES_PASSWORD: brewpass
+          POSTGRES_DB: brewlite_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U brewuser -d brewlite_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgresql://brewuser:brewpass@localhost:5432/brewlite_test?schema=public
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: apps/api/package-lock.json
+
+      - name: Install
+        run: |
+          npm ci
+          npx prisma generate
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit Test
+        run: npm test
+
+      - name: Integration Test (HTTP + PostgreSQL)
+        run: npm run test:integration
+
+      - name: Build
+        run: npm run build
+
+  web:
+    name: Web (Next.js) - Install → Lint → Unit Test → Build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./apps/web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_PUBLIC_API_URL: http://localhost:4000/api
+
