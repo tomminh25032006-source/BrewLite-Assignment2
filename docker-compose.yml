@@ -1,0 +1,58 @@
+# Chạy toàn bộ hệ thống ở local: web (Next.js) + api (NestJS) + PostgreSQL
+# Cách dùng: cp .env.example .env && docker compose up --build
+services:
+  postgres-db:
+    image: postgres:16-alpine
+    container_name: brewlite_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-brewuser}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-brewpass}
+      POSTGRES_DB: ${POSTGRES_DB:-brewlite_db}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-brewuser} -d ${POSTGRES_DB:-brewlite_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    container_name: brewlite_api
+    restart: unless-stopped
+    ports:
+      - "${API_PORT:-4000}:4000"
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      DATABASE_URL: postgresql://${POSTGRES_USER:-brewuser}:${POSTGRES_PASSWORD:-brewpass}@postgres-db:5432/${POSTGRES_DB:-brewlite_db}?schema=public
+      JWT_SECRET: ${JWT_SECRET:?Thiếu JWT_SECRET trong file .env}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+
+  web:
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:4000/api}
+    container_name: brewlite_web
+    restart: unless-stopped
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  postgres_data:

@@ -1,0 +1,145 @@
+@startuml activity-checkout
+title Sơ đồ Hoạt động Luồng Mua hàng và Thanh toán End-to-End (Activity Diagram with Swimlanes)
+
+skinparam conditionStyle inside
+skinparam ActivityFontSize 12
+skinparam ArrowFontSize 11
+skinparam defaultTextAlignment center
+
+|#EFEBE9|Khách hàng|
+|#FFF8E1|Giao diện Next.js|
+|#E1F5FE|Backend NestJS API|
+|#ECEFF1|Cơ sở dữ liệu (PostgreSQL)|
+|#E8F5E9|Nhân viên Barista|
+
+|Khách hàng|
+start
+:Mở ứng dụng BrewLite;
+
+|Giao diện Next.js|
+:Tải và hiển thị menu
+(skeleton khi đang tải, empty/error khi cần);
+
+|Khách hàng|
+:Duyệt menu và chọn món;
+
+|Giao diện Next.js|
+:Hiển thị modal tùy biến size & topping
+(giá cập nhật theo cấu hình từng món);
+
+|Khách hàng|
+:Chọn size, topping, số lượng;
+:Bấm "Thêm vào giỏ";
+
+|Giao diện Next.js|
+:Lưu món vào giỏ (Zustand + LocalStorage);
+
+|Khách hàng|
+:Mở giỏ hàng, nhập mã giảm giá (tùy chọn);
+:Bấm "Tiến hành Thanh toán";
+
+|Giao diện Next.js|
+if (Đã đăng nhập?) then (Chưa)
+  :Hiển thị AuthModal;
+  |Khách hàng|
+  :Đăng nhập hoặc đăng ký;
+  |Giao diện Next.js|
+  :Lưu JWT;
+else (Rồi)
+endif
+:Hiển thị trang checkout;
+
+|Khách hàng|
+:Chọn Ví MoMo / VNPay / Thẻ;
+
+repeat
+  |Khách hàng|
+  :Bấm "Xác nhận trả";
+  |Giao diện Next.js|
+  if (Đã có đơn PENDING?) then (Chưa)
+    :Gửi POST /api/orders;
+    |Backend NestJS API|
+    :Kiểm tra JWT, validate DTO,
+    tính lại giá từ cấu hình món;
+    if (Đủ tồn kho?) then (Không)
+      :Trả 409 Conflict;
+      |Giao diện Next.js|
+      :Báo món đã hết hàng,
+      giữ nguyên giỏ hàng;
+      stop
+    else (Đủ)
+      |Cơ sở dữ liệu (PostgreSQL)|
+      :Lưu đơn PENDING (mã ORD-XXXXXX);
+    endif
+  else (Có, thanh toán lại)
+  endif
+
+  |Giao diện Next.js|
+  :Sinh Idempotency-Key,
+  gửi POST /api/payments;
+  |Backend NestJS API|
+  :Kiểm tra chủ đơn và Idempotency-Key;
+  :Gọi dịch vụ thanh toán mô phỏng;
+  if (Kết quả thanh toán?) then (Thành công)
+    :Bắt đầu transaction;
+    |Cơ sở dữ liệu (PostgreSQL)|
+    :Đơn → PAID (chỉ khi còn PENDING/PAYMENT_FAILED);
+    :Trừ tồn kho theo version (optimistic lock);
+    if (Đủ tồn kho và version khớp?) then (Không)
+      |Backend NestJS API|
+      :Rollback, trả 409 Conflict;
+      |Giao diện Next.js|
+      :Báo món đã hết hàng,
+      giữ nguyên giỏ hàng;
+      stop
+    else (Có)
+      |Cơ sở dữ liệu (PostgreSQL)|
+      :Cộng điểm loyalty, ghi LoyaltyTransaction;
+      :Lưu Payment SUCCESS kèm Idempotency-Key;
+      |Backend NestJS API|
+      :Commit, trả 201 SUCCESS;
+    endif
+  else (Thất bại)
+    |Cơ sở dữ liệu (PostgreSQL)|
+    :Đơn → PAYMENT_FAILED,
+    lưu Payment FAILED;
+    |Giao diện Next.js|
+    :Báo thanh toán thất bại,
+    giữ nguyên giỏ hàng;
+    |Khách hàng|
+    if (Khách chọn?) then (Hủy đơn)
+      |Backend NestJS API|
+      :POST /api/orders/:id/cancel
+      → đơn CANCELLED;
+      |Giao diện Next.js|
+      :Báo đã hủy đơn, giữ giỏ hàng để đặt lại;
+      stop
+    else (Thanh toán lại)
+    endif
+  endif
+|Khách hàng|
+repeat while (Thanh toán thất bại và khách thanh toán lại?) is (Có) not (Không)
+
+|Giao diện Next.js|
+:Xóa giỏ hàng (clearCart);
+:Chuyển sang /orders/:id, hiển thị mã đơn
+và timeline (tự cập nhật trạng thái);
+
+|Nhân viên Barista|
+:Đăng nhập tài khoản STAFF, mở KDS (/staff);
+:Nhận đơn PAID → PREPARING;
+:Pha chế đồ uống;
+:Pha xong → READY;
+
+|Giao diện Next.js|
+:Trang theo dõi đơn tự chuyển sang
+"Đồ uống đã sẵn sàng";
+
+|Khách hàng|
+:Đến quầy, đọc mã đơn;
+
+|Nhân viên Barista|
+:Giao đồ uống → COMPLETED;
+
+stop
+@enduml

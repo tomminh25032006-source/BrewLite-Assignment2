@@ -1,0 +1,190 @@
+name: CD Production
+
+# Push/Tag → Lint & Test → Build → Docker Image → Push Registry → Deploy → Smoke Test (→ Rollback nếu lỗi)
+#
+# Cấu hình cần có trong GitHub (Settings → Secrets and variables → Actions):
+#   secrets.RENDER_DEPLOY_HOOK_URL  Deploy Hook của Render Web Service (API, loại "Existing Image")
+#   secrets.VERCEL_TOKEN            Token Vercel
+#   secrets.VERCEL_ORG_ID           Vercel Org ID
+#   secrets.VERCEL_PROJECT_ID       Vercel Project ID (Root Directory = apps/web)
+#   vars.API_URL                    URL API production, ví dụ https://brewlite-api.onrender.com
+#   vars.WEB_URL                    URL web production, ví dụ https://brewlite-web.vercel.app
+on:
+  push:
+    branches: [main]
+    tags: ['v*.*.*']
+
+concurrency:
+  group: production
+  cancel-in-progress: false
+
+env:
+  IMAGE_NAME: brewlite-api
+
+jobs:
+  quality-gate:
+    name: 1. Quality Gate (Lint, Test, Build)
+    uses: ./.github/workflows/ci.yml
+
+  image:
+    name: 2. Build & Push Docker Image (GHCR)
+    needs: quality-gate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.vars.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: vars
+        name: Tính tên image (tag = commit SHA)
+        run: |
+          repo="ghcr.io/$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')/${IMAGE_NAME}"
+          echo "repo=${repo}" >> "$GITHUB_OUTPUT"
+          echo "image=${repo}:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.vars.outputs.repo }}
+          tags: |
+            type=raw,value=${{ github.sha }}
+            type=semver,pattern={{version}}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./apps/api
+          push: true
+          # Ghi commit SHA vào image để /api/health trả về đúng bản đang chạy
+          build-args: GIT_SHA=${{ github.sha }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+  deploy-api:
+    name: 3. Deploy API (Render) + Migration
+    needs: image
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      # Container chạy `prisma migrate deploy` trước khi start (xem apps/api/Dockerfile):
+      # chỉ áp dụng các migration đã commit, không reset dữ liệu. Migration lỗi → container không lên → smoke test fail → rollback.
+      - name: Trigger Render deploy với image theo commit SHA
+        env:
+          HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+        run: |
+          test -n "$HOOK" || { echo "::error::Thiếu secret RENDER_DEPLOY_HOOK_URL"; exit 1; }
+          curl -fsS -X POST -G "$HOOK" --data-urlencode "imgURL=${{ needs.image.outputs.image }}"
+
+      # Render giữ bản cũ chạy cho tới khi bản mới healthy, nên phải chờ đúng commit vừa deploy;
+      # chỉ kiểm tra "database":"up" thì bản cũ cũng pass.
+      - name: Chờ API mới (đúng commit SHA) healthy
+        run: |
+          for _ in $(seq 1 40); do
+            body=$(curl -fs "${{ vars.API_URL }}/api/health" || true)
+            echo "$body"
+            if echo "$body" | jq -e --arg sha "$GITHUB_SHA" '.commit == $sha and .database == "up"' > /dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "::error::API chưa chạy commit $GITHUB_SHA hoặc không healthy sau khi deploy"
+          exit 1
+
+  deploy-web:
+    name: 4. Deploy Web (Vercel)
+    needs: deploy-api
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build & deploy production
+        run: |
+          npx vercel@39 pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+          npx vercel@39 build --prod --token=${{ secrets.VERCEL_TOKEN }}
+          npx vercel@39 deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }}
+
+  smoke-test:
+    name: 5. Smoke Test Production
+    needs: [deploy-api, deploy-web]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Health check + API + Web
+        run: |
+          curl -fsS "${{ vars.API_URL }}/api/health" | jq -e --arg sha "$GITHUB_SHA" '.status == "healthy" and .commit == $sha'
+          curl -fsS "${{ vars.API_URL }}/api/products" | grep -q '"id"'
+          curl -fsS -o /dev/null "${{ vars.WEB_URL }}/"
+          curl -fsS -o /dev/null "${{ vars.WEB_URL }}/menu"
+          echo "✔ Production đang hoạt động"
+
+  promote:
+    name: 6. Đánh dấu image ổn định (stable)
+    needs: [image, smoke-test]
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    steps:
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/setup-buildx-action@v3
+      - name: Gắn tag stable cho image vừa deploy thành công
+        run: |
+          image="${{ needs.image.outputs.image }}"
+          docker buildx imagetools create -t "${image%:*}:stable" "$image"
+
+  rollback:
+    name: 7. Rollback khi deploy hoặc smoke test thất bại
+    needs: [image, deploy-api, deploy-web, smoke-test]
+    if: failure() && needs.image.result == 'success'
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      packages: read
+    steps:
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/setup-buildx-action@v3
+
+      # Lần deploy đầu tiên chưa có tag stable: không có bản cũ để quay về, chỉ báo lỗi
+      - name: Rollback API về image stable gần nhất
+        env:
+          HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+        run: |
+          image="${{ needs.image.outputs.image }}"
+          stable="${image%:*}:stable"
+          if ! docker buildx imagetools inspect "$stable" > /dev/null 2>&1; then
+            echo "::warning::Chưa có image $stable (lần deploy đầu), bỏ qua rollback API. Sửa lỗi rồi deploy lại."
+            exit 0
+          fi
+          curl -fsS -X POST -G "$HOOK" --data-urlencode "imgURL=$stable"
+
+      - name: Rollback Web về bản production trước đó
+        if: needs.deploy-web.result == 'success'
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          if ! npx vercel@39 rollback --token=${{ secrets.VERCEL_TOKEN }}; then
+            echo "::warning::Không rollback được web (có thể chưa có bản production trước đó)"
+          fi
+
+      - name: Đánh dấu pipeline thất bại
+        run: |
+          echo "::error::Deploy thất bại, đã rollback về phiên bản stable trước đó"
+          exit 1

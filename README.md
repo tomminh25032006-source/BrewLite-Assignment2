@@ -1,7 +1,6 @@
 # ☕ BrewLite — Cashless Coffee Ordering System
 > **Môn học:** Công nghệ Phần mềm — Khoa CNTT, Trường Đại học Sài Gòn — Học kỳ I (2026–2027)
 > **Bài tập lớn:** Assignment 2 – Requirements to Deployment (VER 1.0)
-> **Trạng thái:** đang thực hiện Task 1 → Task 5 theo thứ tự của đề.
 
 BrewLite là web-app đặt cà phê và thanh toán không dùng tiền mặt:
 
@@ -53,6 +52,64 @@ brewlite/
 ├── .env.example
 ├── CHANGELOG.md
 └── README.md
+```
+
+---
+
+## 🚀 Chạy local
+
+### Cách 1 – Docker Compose (khuyên dùng)
+Yêu cầu: Docker Desktop.
+```bash
+cp .env.example .env          # đổi JWT_SECRET
+docker compose up --build
+```
+- Web: http://localhost:3000
+- API: http://localhost:4000/api — Health: http://localhost:4000/api/health
+- Container API tự chạy `prisma migrate deploy` và seed dữ liệu mẫu. Dữ liệu nằm trong volume `postgres_data`.
+- Nếu cổng `5432`, `4000` hoặc `3000` đã bị chương trình khác dùng, đổi `POSTGRES_PORT`, `API_PORT`, `WEB_PORT` trong `.env` (đổi `API_PORT` thì sửa luôn `NEXT_PUBLIC_API_URL` cho khớp) rồi chạy lại `docker compose up --build`.
+
+### Cách 2 – Chạy từng phần (Node.js 20+)
+```bash
+# 1. PostgreSQL
+cp .env.example .env
+docker compose up -d postgres-db
+
+# 2. API
+cd apps/api
+cp .env.example .env          # sửa DATABASE_URL, JWT_SECRET
+npm ci
+npm run prisma:migrate:dev    # tạo bảng từ prisma/migrations
+npm run prisma:seed
+npm run start:dev             # http://localhost:4000/api
+
+# 3. Web
+cd apps/web
+npm ci
+npm run dev                   # http://localhost:3000
+```
+
+---
+
+## 🧪 Kiểm thử
+
+| Loại | Lệnh | Số test |
+| :--- | :--- | :---: |
+| Unit test API | `cd apps/api && npm test` | 9 |
+| Unit/component test web | `cd apps/web && npm test` | 4 |
+| Integration test (HTTP + PostgreSQL) | `cd apps/api && TEST_DATABASE_URL=postgresql://brewuser:brewpass@localhost:5432/brewlite_test npm run test:integration` | 4 |
+| Lint | `npm run lint` trong `apps/api` và `apps/web` | – |
+
+Integration test dùng database riêng `brewlite_test` và xóa dữ liệu đơn hàng trước mỗi test, không trỏ vào database thật. Danh sách mã test và truy vết: [`docs/traceability-matrix.md`](docs/traceability-matrix.md).
+
+---
+
+## 📦 Build
+
+```bash
+cd apps/api && npm run build      # dist/main.js + dist-seed/seed.js
+cd apps/web && npm run build
+docker compose build              # build cả hai image
 ```
 
 ---
