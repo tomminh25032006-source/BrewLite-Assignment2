@@ -12,6 +12,19 @@ BrewLite là web-app đặt cà phê và thanh toán không dùng tiền mặt:
 
 ---
 
+## 🌐 Production
+
+| Thành phần | URL |
+| :--- | :--- |
+| Web (HTTPS) | [https://brew-lite-assignment2.vercel.app](https://brew-lite-assignment2.vercel.app) |
+| API | [https://brewlite-api-n0j4.onrender.com/api](https://brewlite-api-n0j4.onrender.com/api/products) |
+| Health check | [https://brewlite-api-n0j4.onrender.com/api/health](https://brewlite-api-n0j4.onrender.com/api/health) |
+| Demo end-to-end | Demo trực tiếp trên URL production khi chấm (kịch bản: [`docs/sprint-retrospective.md`](docs/sprint-retrospective.md) §2.1) |
+| Product Backlog / Issue board | [GitHub Project – BrewLite Product Backlog](https://github.com/users/tomminh25032006-source/projects/1) · [Issues](https://github.com/tomminh25032006-source/BrewLite-Assignment2/issues?q=is%3Aissue) · [Milestones](https://github.com/tomminh25032006-source/BrewLite-Assignment2/milestones?state=closed) |
+| Release | [`v1.0.0`](CHANGELOG.md) |
+
+---
+
 ## 🛠️ Công nghệ
 
 | Thành phần | Công nghệ |
@@ -64,9 +77,10 @@ Yêu cầu: Docker Desktop.
 cp .env.example .env          # đổi JWT_SECRET
 docker compose up --build
 ```
-- Web: http://localhost:3000
+- Web: http://localhost:3000 — KDS nhân viên quầy: http://localhost:3000/staff
 - API: http://localhost:4000/api — Health: http://localhost:4000/api/health
 - Container API tự chạy `prisma migrate deploy` và seed dữ liệu mẫu. Dữ liệu nằm trong volume `postgres_data`.
+- Tài khoản demo (mật khẩu `Password123!`): khách hàng `customer@brewlite.vn`; barista `barista@brewlite.vn` (chỉ tài khoản vai trò `STAFF` mở được `/staff`). Mã giảm giá: `BREW10`, `BREWNEW`.
 - Nếu cổng `5432`, `4000` hoặc `3000` đã bị chương trình khác dùng, đổi `POSTGRES_PORT`, `API_PORT`, `WEB_PORT` trong `.env` (đổi `API_PORT` thì sửa luôn `NEXT_PUBLIC_API_URL` cho khớp) rồi chạy lại `docker compose up --build`.
 
 ### Cách 2 – Chạy từng phần (Node.js 20+)
@@ -95,9 +109,10 @@ npm run dev                   # http://localhost:3000
 
 | Loại | Lệnh | Số test |
 | :--- | :--- | :---: |
-| Unit test API | `cd apps/api && npm test` | 9 |
-| Unit/component test web | `cd apps/web && npm test` | 4 |
-| Integration test (HTTP + PostgreSQL) | `cd apps/api && TEST_DATABASE_URL=postgresql://brewuser:brewpass@localhost:5432/brewlite_test npm run test:integration` | 4 |
+| Unit test API | `cd apps/api && npm test` | 35 |
+| Unit/component test web | `cd apps/web && npm test` | 7 |
+| Integration test (HTTP + PostgreSQL) | `cd apps/api && TEST_DATABASE_URL=postgresql://brewuser:brewpass@localhost:5432/brewlite_test npm run test:integration` | 24 |
+| E2E (Playwright) | `npm ci && npx playwright install chromium && docker compose up -d --build && npm run test:e2e` (ở thư mục gốc) | 2 |
 | Lint | `npm run lint` trong `apps/api` và `apps/web` | – |
 
 Integration test dùng database riêng `brewlite_test` và xóa dữ liệu đơn hàng trước mỗi test, không trỏ vào database thật. Danh sách mã test và truy vết: [`docs/traceability-matrix.md`](docs/traceability-matrix.md).
@@ -111,6 +126,22 @@ cd apps/api && npm run build      # dist/main.js + dist-seed/seed.js
 cd apps/web && npm run build
 docker compose build              # build cả hai image
 ```
+
+---
+
+## 🚢 Deploy và Rollback
+
+- **CI** ([`ci.yml`](.github/workflows/ci.yml)): mỗi pull request chạy Install → Lint → Unit Test → Integration Test → Build → E2E.
+- **CD** ([`cd.yml`](.github/workflows/cd.yml)): push lên `main` hoặc tag `v*.*.*` → quality gate → build image `ghcr.io/tomminh25032006-source/brewlite-api:<SHA>` → push GHCR → deploy Render (migration chạy khi container khởi động) → deploy Vercel → smoke test `/api/health` → gắn tag `stable`.
+- **Xác nhận bản mới:** image được build kèm `GIT_SHA`; `/api/health` trả `commit`, pipeline chỉ đi tiếp khi API production đang chạy đúng commit vừa deploy.
+- **Rollback tự động:** deploy hoặc smoke test lỗi → deploy lại image `stable` và `vercel rollback`, pipeline báo failed. Lần deploy đầu (chưa có `stable`) thì bỏ qua rollback API và chỉ báo lỗi.
+- **Rollback thủ công:**
+  ```bash
+  curl -X POST -G "$RENDER_DEPLOY_HOOK_URL" --data-urlencode "imgURL=ghcr.io/tomminh25032006-source/brewlite-api:<SHA ổn định>"
+  npx vercel rollback --token "$VERCEL_TOKEN"
+  ```
+
+Chi tiết thiết lập Render/Vercel/GHCR và danh sách secret: [`docs/deployment.md`](docs/deployment.md).
 
 ---
 
@@ -155,4 +186,3 @@ Render lại sơ đồ sau khi sửa `.puml`:
 ```bash
 docker run --rm -v "$(pwd)/docs/diagrams:/data" plantuml/plantuml:1.2024.8 -tsvg -charset UTF-8 /data/*.puml
 ```
-
