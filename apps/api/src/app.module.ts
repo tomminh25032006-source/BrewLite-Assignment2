@@ -4,8 +4,11 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { PrismaModule } from './prisma/prisma.module';
 import { ProductsModule } from './modules/products/products.module';
+import { AuthModule } from './modules/auth/auth.module';
+import { OrdersModule } from './modules/orders/orders.module';
+import { PaymentsModule } from './modules/payments/payments.module';
+import { PromotionsModule } from './modules/promotions/promotions.module';
 
-// Sprint 1: chỉ có menu (Products) và health check
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -13,6 +16,10 @@ import { ProductsModule } from './modules/products/products.module';
     }),
     PrismaModule,
     ProductsModule,
+    AuthModule,
+    OrdersModule,
+    PaymentsModule,
+    PromotionsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
