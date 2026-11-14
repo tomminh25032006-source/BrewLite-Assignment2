@@ -38,7 +38,7 @@ describe('UT-T04 ProductsService', () => {
     it('chỉ lấy sản phẩm đang mở bán', async () => {
       prisma.product.findMany.mockResolvedValue([coffee]);
       const result = await service.findAll();
-      expect(result).toHaveLength(1);
+      expect(result).toHaveLength(99);
       expect(prisma.product.findMany).toHaveBeenCalledWith(
         expect.objectContaining({ where: { isActive: true } }),
       );
