@@ -1,0 +1,43 @@
+@startuml use-case-overview
+title Sơ đồ Use-case tổng quát – Hệ thống BrewLite (Task 1.2)
+left to right direction
+skinparam packageStyle rectangle
+skinparam usecaseBackgroundColor #FFFDF7
+skinparam usecaseBorderColor #92400E
+skinparam actorBorderColor #44403C
+
+actor "Khách hàng\n(Customer)" as Customer
+actor "Nhân viên quầy\n(Barista)" as Barista
+actor "Dịch vụ thanh toán\nmô phỏng" as Payment <<system>>
+
+rectangle "Hệ thống BrewLite" {
+  usecase "UC-02 Xem menu,\ntìm kiếm, lọc danh mục" as UC02
+  usecase "UC-03 Tùy biến size & topping" as UC03
+  usecase "UC-04 Quản lý giỏ hàng" as UC04
+  usecase "UC-05 Đăng ký / Đăng nhập" as UC05
+  usecase "UC-01 Đặt và thanh toán\nđơn hàng (trọng tâm)" as UC01 #FFEDD5
+  usecase "UC-06 Áp dụng mã giảm giá" as UC06
+  usecase "UC-07 Theo dõi trạng thái đơn" as UC07
+  usecase "UC-08 Xem lịch sử đơn" as UC08
+  usecase "UC-09 Hủy đơn chưa thanh toán" as UC09
+  usecase "UC-10 Quản lý pha chế trên KDS\n(chỉ tài khoản STAFF)" as UC10
+}
+
+Customer --> UC02
+Customer --> UC04
+Customer --> UC05
+Customer --> UC01
+Customer --> UC07
+Customer --> UC08
+Customer --> UC09
+
+Barista --> UC05
+Barista --> UC10
+
+UC01 --> Payment
+
+UC03 .> UC02 : <<extend>>
+UC06 .> UC01 : <<extend>>
+UC01 .> UC04 : <<include>>
+UC01 .> UC05 : <<include>>
+@enduml
