@@ -11,15 +11,15 @@
 | Thành phần | Nền tảng | Mã nguồn | Ghi chú |
 | :--- | :--- | :--- | :--- |
 | Web (Next.js, PWA) | **Vercel** (CDN, HTTPS) | `apps/web` | Project Vercel có *Root Directory* = `apps/web` |
-| API (NestJS) | **Render** – Web Service loại *Existing Image* | `apps/api` (`Dockerfile`) | Kéo image `ghcr.io/<owner>/brewlite-api:<commit SHA>` |
+| API (NestJS) | **Render** – Web Service loại *Existing Image* | `apps/api` (`Dockerfile`) | Kéo image `ghcr.io/tomminh25032006-source/brewlite-api:<commit SHA>` |
 | Container registry | **GitHub Container Registry (GHCR)** | `.github/workflows/cd.yml` | Tag theo commit SHA, semver (khi push tag) và `stable` |
 | Database | **Render PostgreSQL 16** | `apps/api/prisma` | Chỉ dùng *Internal Database URL*; không mở kết nối public |
 
 | URL | Giá trị |
 | :--- | :--- |
-| Web production | `<điền URL Vercel thật, ví dụ https://brewlite-xxx.vercel.app>` |
-| API production | `<điền URL Render thật, ví dụ https://brewlite-api-xxx.onrender.com>/api` |
-| Health check | `<API production>/api/health` |
+| Web production | [https://brew-lite-assignment2.vercel.app](https://brew-lite-assignment2.vercel.app) |
+| API production | [https://brewlite-api-n0j4.onrender.com/api](https://brewlite-api-n0j4.onrender.com/api/products) |
+| Health check | [https://brewlite-api-n0j4.onrender.com/api/health](https://brewlite-api-n0j4.onrender.com/api/health) |
 
 ---
 
@@ -56,7 +56,7 @@ Health Check Path trên Render: `/api/health`.
 
 1. **Render PostgreSQL:** tạo database `brewlite-db` (PostgreSQL 16, region Singapore). Sao chép *Internal Database URL*.
 2. **GHCR:** chạy pipeline CD một lần (push lên `main`) để tạo package `brewlite-api`. Vào *Packages → brewlite-api → Package settings* đặt **Public**, hoặc khai báo registry credential trong Render.
-3. **Render Web Service:** *New → Web Service → Existing Image*, nhập `ghcr.io/<owner>/brewlite-api:stable` (hoặc tag SHA), cùng region với database. Khai báo biến ở mục 2.1, Health Check Path `/api/health`. Sao chép *Deploy Hook* vào secret `RENDER_DEPLOY_HOOK_URL`.
+3. **Render Web Service:** *New → Web Service → Existing Image*, nhập `ghcr.io/tomminh25032006-source/brewlite-api:stable` (hoặc tag SHA), cùng region với database. Khai báo biến ở mục 2.1, Health Check Path `/api/health`. Sao chép *Deploy Hook* vào secret `RENDER_DEPLOY_HOOK_URL`.
 4. **Vercel:** *Import* repository, Root Directory `apps/web`, thêm `NEXT_PUBLIC_API_URL`. Tắt *Automatic Git deployments* cho nhánh `main` để chỉ pipeline CD deploy production. Lấy token, org ID, project ID (file `.vercel/project.json` sau khi chạy `npx vercel link`).
 5. Điền `API_URL`, `WEB_URL` vào GitHub Variables, cập nhật URL thật vào mục 1 và `README.md`.
 
@@ -69,7 +69,7 @@ Kích hoạt khi push lên `main` hoặc push tag `v*.*.*`:
 | Bước | Job | Nội dung |
 | :--: | :--- | :--- |
 | 1 | `quality-gate` | Gọi lại `ci.yml`: lint, unit test, integration test, build, E2E |
-| 2 | `image` | Build `apps/api/Dockerfile`, push `ghcr.io/<owner>/brewlite-api:<SHA>` (thêm tag semver khi push tag) |
+| 2 | `image` | Build `apps/api/Dockerfile`, push `ghcr.io/tomminh25032006-source/brewlite-api:<SHA>` (thêm tag semver khi push tag) |
 | 3 | `deploy-api` | Gọi Render Deploy Hook với `imgURL=<image:SHA>`, chờ `/api/health` trả `commit` đúng SHA vừa build và `database: up` (Render giữ bản cũ chạy trong lúc deploy, nên chỉ kiểm tra `database: up` là chưa đủ) |
 | 4 | `deploy-web` | `vercel build --prod` + `vercel deploy --prebuilt --prod` |
 | 5 | `smoke-test` | Health check (`status: healthy`, đúng `commit`), `/api/products`, trang `/` và `/menu` |
@@ -94,7 +94,7 @@ Kích hoạt khi push lên `main` hoặc push tag `v*.*.*`:
 **Thủ công:**
 ```bash
 # API: deploy lại image của một commit ổn định
-curl -X POST -G "$RENDER_DEPLOY_HOOK_URL" --data-urlencode "imgURL=ghcr.io/<owner>/brewlite-api:<SHA ổn định>"
+curl -X POST -G "$RENDER_DEPLOY_HOOK_URL" --data-urlencode "imgURL=ghcr.io/tomminh25032006-source/brewlite-api:<SHA ổn định>"
 
 # Web: quay về bản production trước đó
 npx vercel rollback --token "$VERCEL_TOKEN"
