@@ -1,0 +1,133 @@
+// Prisma Schema for BrewLite Cashless Coffee Ordering System
+// Đơn vị tiền tệ: VND (số nguyên, không có phần thập phân)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum OrderStatus {
+  PENDING
+  PAID
+  PREPARING
+  READY
+  COMPLETED
+  PAYMENT_FAILED
+  CANCELLED
+}
+
+enum PaymentMethod {
+  MOMO
+  VNPAY
+  CARD
+}
+
+enum PaymentStatus {
+  SUCCESS
+  FAILED
+}
+
+// CUSTOMER đặt món; STAFF (nhân viên quầy/barista) dùng màn hình KDS để xem mọi đơn và đổi trạng thái pha chế
+enum Role {
+  CUSTOMER
+  STAFF
+}
+
+model User {
+  id                  String               @id @default(cuid())
+  email               String               @unique
+  passwordHash        String
+  fullName            String
+  role                Role                 @default(CUSTOMER)
+  loyaltyPoints       Int                  @default(0)
+  orders              Order[]
+  loyaltyTransactions LoyaltyTransaction[]
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+}
+
+model Product {
+  id             String      @id @default(cuid())
+  name           String
+  category       String // COFFEE, TEA, ICE_BLENDED, SNACK
+  price          Int
+  imageUrl       String
+  description    String
+  stock          Int         @default(100)
+  version        Int         @default(0) // Optimistic Locking (ADR-003)
+  isActive       Boolean     @default(true)
+  sizeOptions    Json // [{ size: "M", extraPrice: 5000 }]
+  toppingOptions Json // [{ id: "top_01", name: "Trân Châu Trắng", price: 8000 }]
+  orderItems     OrderItem[]
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+}
+
+model Order {
+  id                  String               @id @default(cuid())
+  orderCode           String               @unique // e.g. ORD-104271
+  userId              String
+  user                User                 @relation(fields: [userId], references: [id])
+  status              OrderStatus          @default(PENDING)
+  total               Int
+  discountAmount      Int                  @default(0)
+  finalAmount         Int
+  promotionCode       String?
+  promotion           Promotion?           @relation(fields: [promotionCode], references: [code])
+  items               OrderItem[]
+  payments            Payment[]
+  loyaltyTransactions LoyaltyTransaction[]
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+}
+
+model OrderItem {
+  id               String  @id @default(cuid())
+  orderId          String
+  order            Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId        String
+  product          Product @relation(fields: [productId], references: [id])
+  size             String  @default("S") // S, M, L
+  selectedToppings Json // [{ id: "top_02", name: "Kem Cheese", price: 10000 }]
+  qty              Int     @default(1)
+  unitPrice        Int
+  lineTotal        Int
+}
+
+model Payment {
+  id             String        @id @default(cuid())
+  orderId        String
+  order          Order         @relation(fields: [orderId], references: [id])
+  idempotencyKey String        @unique // Khóa Idempotent chống thanh toán lặp (ADR-004)
+  amount         Int
+  method         PaymentMethod
+  status         PaymentStatus
+  transactionRef String?
+  createdAt      DateTime      @default(now())
+}
+
+model Promotion {
+  code            String    @id // e.g. BREW10
+  description     String
+  discountPercent Int // 10 = 10%; 0 = giảm cố định theo maxDiscount
+  maxDiscount     Int
+  minOrderValue   Int
+  isActive        Boolean   @default(true)
+  expiresAt       DateTime?
+  orders          Order[]
+  createdAt       DateTime  @default(now())
+}
+
+model LoyaltyTransaction {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  orderId   String
+  order     Order    @relation(fields: [orderId], references: [id])
+  points    Int // 10.000đ = 1 điểm
+  createdAt DateTime @default(now())
+}
