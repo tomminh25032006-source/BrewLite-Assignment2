@@ -1,0 +1,108 @@
+@startuml sequence-checkout
+autonumber "<b>[00]</b>"
+title Sơ đồ Tuần tự: UC-01 Đặt và Thanh toán Đơn hàng (Sequence Diagram)
+
+actor "Khách hàng\n(Customer)" as User #EFEBE9
+participant "Next.js UI\n(Frontend)" as UI #FFF8E1
+participant "NestJS API\n(Backend)" as API #E1F5FE
+database "PostgreSQL\n(Database)" as DB #ECEFF1
+participant "Payment Service\n(mô phỏng)" as Gate #F0FDF4
+note over Gate: Dịch vụ thanh toán mô phỏng trong PaymentsService\n(cờ simulateFailure = true → trả FAILED)
+
+== Giai đoạn 1: Đăng nhập và tạo đơn hàng (PENDING) ==
+
+User -> UI: Bấm "Tiến hành Thanh toán" tại /cart
+activate UI
+UI -> UI: Kiểm tra AuthStore (JWT)
+alt Chưa đăng nhập
+    UI -> User: Hiển thị AuthModal
+    User -> UI: Nhập email, mật khẩu
+    UI -> API: POST /api/auth/login
+    API --> UI: 201 { accessToken, user }
+    UI -> UI: Lưu JWT vào LocalStorage
+end
+
+User -> UI: Chọn "Ví MoMo", bấm "Xác nhận trả 90.000 đ"
+UI -> API: POST /api/orders\nAuthorization: Bearer <JWT>\n{ items: [{ productId, size, toppingIds, qty }], promotionCode }
+activate API
+API -> API: JwtAuthGuard: kiểm tra chữ ký và hạn JWT
+API -> API: ValidationPipe: validate DTO\n(whitelist, forbidNonWhitelisted)
+alt JWT không hợp lệ / DTO sai
+    API --> UI: 401 Unauthorized / 400 Bad Request
+end
+API -> DB: SELECT * FROM "Product" WHERE id IN (...)
+DB --> API: giá, sizeOptions, toppingOptions, stock
+API -> API: Tính lại đơn giá: giá gốc + phụ thu size + topping\n(không dùng giá client gửi lên)
+
+alt Số lượng đặt vượt tồn kho
+    API --> UI: 409 Conflict "Sản phẩm ... không đủ số lượng tồn kho"
+    UI -> User: Báo món đã hết hàng, giữ nguyên giỏ hàng
+else Đủ hàng
+    API -> DB: SELECT * FROM "Promotion" WHERE code = :promotionCode
+    DB --> API: Điều kiện mã giảm giá
+    API -> API: Tính giảm giá (sai mã / chưa đủ điều kiện → 400)
+    API -> DB: INSERT "Order" (status = 'PENDING', finalAmount)\nINSERT "OrderItem" (...)
+    DB --> API: Order ORD-104271
+    API --> UI: 201 Created { id, orderCode: "ORD-104271", status: "PENDING", finalAmount: 90000 }
+end
+deactivate API
+UI -> UI: So sánh finalAmount với số tiền đã hiển thị\n(lệch → báo số mới, chờ khách xác nhận lại)
+
+== Giai đoạn 2: Thanh toán idempotent ==
+
+UI -> UI: Sinh Idempotency-Key K (UUID) cho lần thanh toán này,\nkhóa nút; giữ nguyên K nếu phải gửi lại do lỗi mạng
+UI -> API: POST /api/payments\nIdempotency-Key: K, Authorization: Bearer <JWT>\n{ orderId, method: "MOMO", amount: 90000 }
+activate API
+API -> DB: SELECT "Order" WHERE id = :orderId
+DB --> API: Đơn hàng (userId, status, finalAmount, items)
+alt Đơn không thuộc khách đang đăng nhập
+    API --> UI: 404 Not Found
+end
+API -> DB: SELECT * FROM "Payment" WHERE "idempotencyKey" = K
+DB --> API: Kết quả tra cứu key
+
+alt K đã tồn tại (khách bấm lại / client gửi lại)
+    alt K thuộc đơn hàng khác
+        API --> UI: 409 Conflict "Idempotency-Key đã dùng cho đơn khác"
+    else K thuộc đơn này
+        API -> API: Idempotency Hit: không gọi cổng thanh toán, không trừ kho lần nữa
+        API --> UI: 201 { idempotentReplay: true, paymentId (cũ), status, orderStatus }
+    end
+else K mới
+    API -> Gate: Thanh toán { method: "MOMO", amount: order.finalAmount }
+    activate Gate
+    Gate --> API: SUCCESS hoặc FAILED
+    deactivate Gate
+
+    alt Thanh toán THẤT BẠI
+        API -> DB: BEGIN\nUPDATE "Order" SET status = 'PAYMENT_FAILED'\n  WHERE id = :id AND status IN ('PENDING','PAYMENT_FAILED')\nINSERT "Payment" (K, status = 'FAILED')\nCOMMIT
+        API --> UI: 201 { status: "FAILED", orderStatus: "PAYMENT_FAILED" }
+        UI -> User: Báo "Thanh toán thất bại", giữ nguyên giỏ hàng;\nthanh toán lại (key mới) hoặc "Hủy đơn" (POST /api/orders/:id/cancel)
+    else Thanh toán THÀNH CÔNG
+        API -> DB: BEGIN TRANSACTION
+        API -> DB: UPDATE "Order" SET status = 'PAID'\nWHERE id = :id AND status IN ('PENDING','PAYMENT_FAILED')
+        alt 0 dòng bị ảnh hưởng (đơn vừa được giao dịch khác thanh toán)
+            API -> DB: ROLLBACK
+            API --> UI: 409 Conflict "Đơn hàng đã được thanh toán"
+        else 1 dòng (giữ khóa dòng đơn hàng)
+            loop Từng món trong đơn (Optimistic Lock, thử lại khi lệch version)
+                API -> DB: UPDATE "Product" SET stock = stock - qty, version = version + 1\nWHERE id = :id AND version = :expectedVersion AND stock >= qty
+            end
+            alt Không đủ hàng / xung đột version liên tục
+                API -> DB: ROLLBACK (đơn giữ nguyên trạng thái cũ)
+                API --> UI: 409 Conflict "Sản phẩm đã hết hàng"
+                UI -> User: Hiển thị cảnh báo hết món
+            else Trừ kho thành công
+                API -> DB: UPDATE "User" SET loyaltyPoints += floor(finalAmount / 10000)\nINSERT "LoyaltyTransaction" (userId, orderId, points)\nINSERT "Payment" (K, status = 'SUCCESS')
+                API -> DB: COMMIT
+                API --> UI: 201 { status: "SUCCESS", orderStatus: "PAID", idempotentReplay: false, loyaltyPointsAdded }
+                UI -> UI: clearCart(), chuyển sang /orders/:id
+                UI -> User: Màn hình xác nhận #ORD-104271\nvà thanh tiến trình (tự cập nhật trạng thái)
+            end
+        end
+    end
+end
+deactivate API
+deactivate UI
+
+@enduml
