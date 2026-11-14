@@ -1,0 +1,17 @@
+{
+  "name": "brewlite-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev:web": "npm --prefix apps/web run dev",
+    "dev:api": "npm --prefix apps/api run start:dev",
+    "lint": "npm --prefix apps/api run lint && npm --prefix apps/web run lint",
+    "test": "npm --prefix apps/api test && npm --prefix apps/web test",
+    "test:integration": "npm --prefix apps/api run test:integration",
+    "test:e2e": "playwright test",
+    "build": "npm --prefix apps/api run build && npm --prefix apps/web run build"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.48.2"
+  }
+}
