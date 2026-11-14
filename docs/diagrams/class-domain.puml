@@ -1,0 +1,144 @@
+@startuml class-domain
+title Sơ đồ Lớp Mức Domain (Domain Model Class Diagram)\nKhớp với apps/api/prisma/schema.prisma — tiền tệ VND lưu dạng số nguyên
+
+skinparam classAttributeIconSize 0
+skinparam classFontSize 12
+skinparam roundcorner 6
+skinparam defaultTextAlignment left
+
+enum OrderStatus {
+  PENDING
+  PAID
+  PREPARING
+  READY
+  COMPLETED
+  PAYMENT_FAILED
+  CANCELLED
+}
+
+enum PaymentMethod {
+  MOMO
+  VNPAY
+  CARD
+}
+
+enum PaymentStatus {
+  SUCCESS
+  FAILED
+}
+
+enum Role {
+  CUSTOMER
+  STAFF
+}
+
+class User {
+  - String id
+  - String email
+  - String passwordHash
+  - String fullName
+  - Role role
+  - Integer loyaltyPoints
+  - DateTime createdAt
+  - DateTime updatedAt
+  + register(): User
+  + login(): String
+  + addLoyaltyPoints(points: Integer): void
+}
+
+class Product {
+  - String id
+  - String name
+  - String category
+  - Integer price
+  - String imageUrl
+  - String description
+  - Integer stock
+  - Integer version
+  - Boolean isActive
+  - Json sizeOptions
+  - Json toppingOptions
+  - DateTime createdAt
+  - DateTime updatedAt
+  + checkAvailability(qty: Integer): Boolean
+  + deductStockWithOptimisticLock(qty: Integer): void
+}
+
+class Order {
+  - String id
+  - String orderCode
+  - String userId
+  - OrderStatus status
+  - Integer total
+  - Integer discountAmount
+  - Integer finalAmount
+  - String promotionCode
+  - DateTime createdAt
+  - DateTime updatedAt
+  + calculateTotal(): Integer
+  + applyPromotion(promo: Promotion): void
+  + transitionTo(newStatus: OrderStatus): void
+}
+
+class OrderItem {
+  - String id
+  - String orderId
+  - String productId
+  - String size
+  - Json selectedToppings
+  - Integer qty
+  - Integer unitPrice
+  - Integer lineTotal
+  + calculateLineTotal(): Integer
+}
+
+class Payment {
+  - String id
+  - String orderId
+  - String idempotencyKey
+  - Integer amount
+  - PaymentMethod method
+  - PaymentStatus status
+  - String transactionRef
+  - DateTime createdAt
+  + verifyIdempotency(): Boolean
+  + executePayment(): PaymentStatus
+}
+
+class Promotion {
+  - String code
+  - String description
+  - Integer discountPercent
+  - Integer maxDiscount
+  - Integer minOrderValue
+  - Boolean isActive
+  - DateTime expiresAt
+  - DateTime createdAt
+  + isValid(orderTotal: Integer): Boolean
+  + computeDiscount(orderTotal: Integer): Integer
+}
+
+class LoyaltyTransaction {
+  - String id
+  - String userId
+  - String orderId
+  - Integer points {dương: cộng khi PAID; âm: thu hồi khi đơn PAID bị hủy}
+  - DateTime createdAt
+  + recordTransaction(): void
+}
+
+' Quan hệ và Multiplicity (Bản số)
+User "1" --> "0..*" Order : places (đặt đơn) >
+User "1" --> "0..*" LoyaltyTransaction : owns (sở hữu) >
+Order "1" *-- "1..*" OrderItem : contains (chứa) >
+Product "1" <-- "0..*" OrderItem : references (tham chiếu) <
+Order "1" --> "0..*" Payment : paid via (thanh toán bằng) >
+Order "0..*" --> "0..1" Promotion : applies (áp dụng voucher) >
+Order "1" <-- "0..1" LoyaltyTransaction : generates (sinh điểm) <
+
+User ..> Role : uses
+Order ..> OrderStatus : uses
+Payment ..> PaymentMethod : uses
+Payment ..> PaymentStatus : uses
+
+@enduml
