@@ -1,0 +1,68 @@
+@startuml deployment-diagram
+title Sơ đồ Triển khai BrewLite (UML Deployment Diagram)\nLocal → CI (GitHub Actions) → Production (Vercel + Render + GHCR)
+
+skinparam nodeFontSize 11
+skinparam artifactFontSize 10
+skinparam defaultTextAlignment center
+
+' ============ LOCAL ============
+rectangle "LOCAL (máy lập trình viên)\ndocker compose up --build" as Local #F5F5F5 {
+  node "<<docker>> brewlite_web\n:3000" as LWeb
+  node "<<docker>> brewlite_api\n:4000" as LApi
+  database "<<docker>> brewlite_postgres\n:5432\nvolume postgres_data" as LDb
+  LWeb ..> LApi : HTTP
+  LApi ..> LDb : TCP 5432
+}
+
+' ============ CI ============
+rectangle "CI/CD (GitHub)" as CI #E8EAF6 {
+  node "GitHub Actions Runner\n(ubuntu-latest)" as Runner {
+    artifact "ci.yml\nInstall → Lint → Unit Test →\nIntegration Test (postgres service) →\nBuild → E2E (Playwright)" as CIJob
+    artifact "cd.yml\nQuality Gate → Docker Image →\nPush GHCR → Deploy → Smoke Test\n→ Promote stable / Rollback" as CDJob
+  }
+  node "<<container registry>>\nGitHub Container Registry\nghcr.io/<owner>/brewlite-api\ntag: <commit SHA>, <semver>, stable" as GHCR
+  artifact "GitHub Secrets / Variables\nRENDER_DEPLOY_HOOK_URL, VERCEL_TOKEN,\nVERCEL_ORG_ID, VERCEL_PROJECT_ID,\nAPI_URL, WEB_URL" as Secrets
+}
+
+' ============ PRODUCTION ============
+rectangle "PRODUCTION" as Prod #FFF8E1 {
+  node "<<device>>\nĐiện thoại / Máy tính" as Device {
+    artifact "Trình duyệt / PWA\n(manifest.json)" as Browser
+  }
+
+  cloud "<<PaaS + CDN>> Vercel" as Vercel {
+    node "Vercel Edge Network" as Edge {
+      artifact "apps/web\nNext.js 14 (App Router)\nHTTPS :443" as NextApp
+      artifact "Env: NEXT_PUBLIC_API_URL" as WebEnv
+    }
+  }
+
+  cloud "<<PaaS>> Render (region Singapore)" as Render {
+    node "<<Web Service: Docker image>>\nbrewlite-api" as ApiNode {
+      artifact "apps/api\nNestJS REST API /api\ncontainer :4000 → HTTPS :443" as NestAPI
+      artifact "Health check: GET /api/health\n(kiểm tra kết nối DB)" as Health
+      artifact "Start: prisma migrate deploy\n→ seed → node dist/main" as Migrate
+      artifact "Env (Render secret):\nDATABASE_URL, JWT_SECRET,\nJWT_EXPIRES_IN" as ApiEnv
+      artifact "Logs: stdout → Render Logs" as Logs
+    }
+    node "<<Managed PostgreSQL 16>>\nbrewlite-db (private network)" as DbNode {
+      database "brewlite_db" as PostgresDB
+      storage "Persistent Disk" as Disk
+    }
+  }
+}
+
+' ---- Connections ----
+Browser --> NextApp : HTTPS 443
+Browser --> NestAPI : HTTPS 443 REST/JSON\nAuthorization: Bearer JWT\nIdempotency-Key
+NestAPI --> PostgresDB : TCP 5432 (Internal URL,\nkhông public ra Internet)
+PostgresDB -- Disk
+
+CIJob ..> CDJob : workflow_call (quality gate)
+CDJob --> GHCR : docker push (GITHUB_TOKEN)
+GHCR --> ApiNode : pull image theo SHA
+CDJob --> ApiNode : Deploy Hook (imgURL=…:SHA)
+CDJob --> NextApp : vercel deploy --prod
+CDJob ..> Health : smoke test (curl -f)
+Secrets ..> CDJob
+@enduml
