@@ -134,7 +134,7 @@ export function AuthModal({
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
                   placeholder="Nguyễn Văn A"
-                  className="w-full pl-9 pr-3 py-2 text-sm rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700/50"
+                  className="w-full pl-9 pr-3 py-2 text-sm text-stone-900 bg-white placeholder:text-stone-400 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700/50"
                 />
               </div>
             </div>
@@ -152,7 +152,7 @@ export function AuthModal({
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="customer@example.com"
-                className="w-full pl-9 pr-3 py-2 text-sm rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700/50"
+                className="w-full pl-9 pr-3 py-2 text-sm text-stone-900 bg-white placeholder:text-stone-400 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700/50"
               />
             </div>
           </div>
@@ -170,7 +170,7 @@ export function AuthModal({
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
-                className="w-full pl-9 pr-3 py-2 text-sm rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700/50"
+                className="w-full pl-9 pr-3 py-2 text-sm text-stone-900 bg-white placeholder:text-stone-400 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-700/50"
               />
             </div>
           </div>
